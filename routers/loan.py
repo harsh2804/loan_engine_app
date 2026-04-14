@@ -86,7 +86,11 @@ async def verify_gstin(
     orc: LoanOrchestrator = Depends(get_orchestrator),
 ):
     try:
-        return await orc.verify_gstin_for_signup(request.gstin)
+        return await orc.verify_gstin_for_signup(
+            request.gstin,
+            fetch_filings=request.fetch_filings,
+            fy=request.fy,
+        )
     except Exception as exc:
         raise _err(exc)
 

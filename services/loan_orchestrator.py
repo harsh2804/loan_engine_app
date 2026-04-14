@@ -163,14 +163,21 @@ class LoanOrchestrator:
     # Step 1 — Register / Update Borrower
     # =========================================================================
 
-    async def verify_gstin_for_signup(self, gstin: str) -> GstinVerifyResponse:
+    async def verify_gstin_for_signup(
+        self,
+        gstin: str,
+        fetch_filings: bool = True,
+        fy: str = "2018-19",
+    ) -> GstinVerifyResponse:
         """
         Verifies GSTIN via external services and stores the identity fields in `signups`.
         This can happen before a borrower row exists.
         """
         uow = self._uow
         gstin = gstin.upper()
-        identity = await self._resolve_borrower_identity(gstin)
+        identity = await self._resolve_borrower_identity(
+            gstin, fetch_filings=fetch_filings, fy=fy
+        )
 
         payload = {
             "gstin": gstin,
@@ -1168,14 +1175,28 @@ class LoanOrchestrator:
             )
         return app
 
-    async def _fetch_business_nature_from_gstin(self, gstin: str) -> Optional[str]:
-        gst_resp = await GstVerificationClient().verify_gst(gstin=gstin)
+    async def _fetch_business_nature_from_gstin(
+        self,
+        gstin: str,
+        fetch_filings: bool = True,
+        fy: str = "2018-19",
+    ) -> Optional[str]:
+        gst_resp = await GstVerificationClient().verify_gst(
+            gstin=gstin, fetch_filings=fetch_filings, fy=fy
+        )
         if not gst_resp.success:
             return None
         return _extract_business_nature_from_gst_payload(gst_resp.data or {})
 
-    async def _resolve_borrower_identity(self, gstin: str) -> dict[str, Optional[str]]:
-        gst_resp = await GstVerificationClient().verify_gst(gstin=gstin)
+    async def _resolve_borrower_identity(
+        self,
+        gstin: str,
+        fetch_filings: bool = True,
+        fy: str = "2018-19",
+    ) -> dict[str, Optional[str]]:
+        gst_resp = await GstVerificationClient().verify_gst(
+            gstin=gstin, fetch_filings=fetch_filings, fy=fy
+        )
         if not gst_resp.success:
             raise RuntimeError(f"GST verification failed: {gst_resp.error}")
 

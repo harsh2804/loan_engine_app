@@ -67,7 +67,7 @@ class BaseApiClient(ABC):
     def _build_headers(self) -> dict[str, str]:
         print("build headers", get_settings().surepass_jwt_token)
         return {
-            "Authorization": f"Bearer {get_settings().surepass_jwt_token}",
+            "Authorization": f"Basic {get_settings().attestr_basic_auth_token}",
             "Content-Type":  "application/json",
         }
         """Return headers dict for every request (auth, content-type, etc.)."""
@@ -93,6 +93,7 @@ class BaseApiClient(ABC):
         *,
         application_id: Optional[str] = None,
     ) -> ApiResponse:
+        print("post", path, body, application_id)
         return await self._request("POST", path, body=body, application_id=application_id)
 
     async def _get(

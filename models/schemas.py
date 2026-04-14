@@ -155,6 +155,8 @@ class GstinVerifyRequest(BaseModel):
         pattern=r"^[0-9]{2}[A-Za-z]{5}[0-9]{4}[A-Za-z][A-Za-z0-9]Z[A-Za-z0-9]$",
         description="GSTIN to verify and store in the signup table",
     )
+    fetch_filings: Optional[bool] = Field(True, description="Whether to fetch GST filings")
+    fy: Optional[str] = Field("2018-19", description="Financial year for filings (e.g., 2018-19, 2023-24)")
 
     @field_validator("gstin")
     @classmethod
