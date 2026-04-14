@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     db_pool_recycle_seconds: int = 3600
 
     # ── Anthropic ────────────────────────────────────────────────────────────
-    anthropic_api_key: str    = Field(..., description=" <anthropic_api_key_redacted>")
+    anthropic_api_key: str    = Field(..., description="Anthropic API key")
     claude_model: str         = "claude-haiku-4-5-20251001"
     claude_batch_size: int    = 200
     claude_timeout_seconds: int = 60
