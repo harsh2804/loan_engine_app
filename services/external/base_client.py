@@ -65,6 +65,7 @@ class BaseApiClient(ABC):
 
     @abstractmethod
     def _build_headers(self) -> dict[str, str]:
+        print("build headers", get_settings().surepass_jwt_token)
         return {
             "Authorization": f"Bearer {get_settings().surepass_jwt_token}",
             "Content-Type":  "application/json",
