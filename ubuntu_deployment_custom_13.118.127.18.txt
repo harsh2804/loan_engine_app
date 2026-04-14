@@ -1,0 +1,178 @@
+﻿Customized Ubuntu Deployment Guide (HTTPS)
+Project: loan_engine_v2
+
+Server Details
+- Server IP: 13.118.127.18
+- SSH User: ubuntu
+- Project Path: /home/ubuntu
+- Run Mode: HTTPS
+- Domain: (not provided)
+- PostgreSQL DB: postgres
+- PostgreSQL User: postgresuser
+- PostgreSQL Password: xxxx
+
+Important HTTPS Note
+- Let's Encrypt requires a real domain pointed to your server.
+- Since domain is not provided, this guide includes:
+  Option A: Recommended HTTPS with domain + Let's Encrypt.
+  Option B: HTTPS on IP using self-signed cert (browser warning expected).
+
+1) Connect to Server
+- ssh ubuntu@13.118.127.18
+
+2) Install Packages
+- sudo apt update && sudo apt upgrade -y
+- sudo apt install -y python3 python3-venv python3-pip git curl unzip build-essential libpq-dev postgresql postgresql-contrib nginx
+
+3) Project Setup
+- cd /home/ubuntu
+- (copy project if needed) scp -r loan_engine_v2 ubuntu@13.118.127.18:/home/ubuntu/
+- cd /home/ubuntu/loan_engine_v2
+
+4) Add Project to Git (First Time)
+- cd /home/ubuntu/loan_engine_v2
+- git init
+- git add .
+- git commit -m "Initial commit"
+- git branch -M main
+- git remote add origin <your-git-repo-url>
+- git push -u origin main
+
+5) Python Environment
+- python3 -m venv .venv
+- source .venv/bin/activate
+- pip install --upgrade pip
+- pip install -r requirements.txt
+
+6) PostgreSQL Setup
+- sudo -u postgres psql
+- CREATE USER postgresuser WITH ENCRYPTED PASSWORD 'xxxx';
+- ALTER USER postgresuser CREATEDB;
+- GRANT ALL PRIVILEGES ON DATABASE postgres TO postgresuser;
+- \q
+
+7) .env (Production) in /home/ubuntu/loan_engine_v2/.env
+Set values as below:
+
+APP_NAME="Multi-Lender Loan Engine"
+DEBUG=false
+LOG_LEVEL=INFO
+
+DATABASE_URL=postgresql+asyncpg://postgresuser:xxxx@localhost:5432/postgres
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=20
+
+ANTHROPIC_API_KEY=<your_key>
+CLAUDE_MODEL=claude-haiku-4-5-20251001
+CLAUDE_BATCH_SIZE=200
+
+# Current API base URLs (included as requested)
+SUREPASS_BASE_URL=https://kyc-api.surepass.app
+SUREPASS_AA_BASE_URL=https://kyc-api.surepass.app
+CAPAXIS_BASE_URL=https://api.capaxis.co.in
+ATTESTR_PUBLIC_BASE_URL=https://api.attestr.com
+
+SUREPASS_JWT_TOKEN=<your_token>
+ATTESTR_BASIC_AUTH_TOKEN=<base64_user_colon_pass>
+ATTESTR_AUTH_TOKEN=
+
+AA_POLL_INTERVAL_SECONDS=5
+AA_POLL_MAX_ATTEMPTS=24
+
+8) Run DB Migration
+- source .venv/bin/activate
+- alembic upgrade head
+
+9) Verify App Manually
+- source .venv/bin/activate
+- uvicorn main:app --host 127.0.0.1 --port 8000
+- curl http://127.0.0.1:8000/health
+- Ctrl+C to stop
+
+10) Create systemd Service
+Create: /etc/systemd/system/loan-engine.service
+
+[Unit]
+Description=Loan Engine FastAPI Service
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/loan_engine_v2
+Environment="PATH=/home/ubuntu/loan_engine_v2/.venv/bin"
+ExecStart=/home/ubuntu/loan_engine_v2/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
+Enable service:
+- sudo systemctl daemon-reload
+- sudo systemctl enable loan-engine
+- sudo systemctl start loan-engine
+- sudo systemctl status loan-engine
+- journalctl -u loan-engine -f
+
+11) Nginx Reverse Proxy
+Create: /etc/nginx/sites-available/loan-engine
+
+server {
+    listen 80;
+    server_name 13.118.127.18;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+Enable Nginx site:
+- sudo ln -s /etc/nginx/sites-available/loan-engine /etc/nginx/sites-enabled/loan-engine
+- sudo nginx -t
+- sudo systemctl reload nginx
+
+12) HTTPS Setup
+Option A (Recommended: with domain)
+- Point your domain DNS A record to 13.118.127.18
+- Update server_name in nginx config to your-domain.com
+- Install certbot: sudo apt install -y certbot python3-certbot-nginx
+- Issue cert: sudo certbot --nginx -d your-domain.com
+- Test renew: sudo certbot renew --dry-run
+
+Option B (No domain: self-signed on IP)
+- sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/loan-engine.key -out /etc/ssl/certs/loan-engine.crt
+- Update nginx with 443 ssl server block using the above key/cert
+- Browser will show warning (expected), but traffic is encrypted.
+
+13) UFW Firewall
+- sudo ufw allow OpenSSH
+- sudo ufw allow 'Nginx Full'
+- sudo ufw --force enable
+- sudo ufw status
+
+14) Post-Deployment Checks
+- curl http://127.0.0.1:8000/health (local app)
+- curl http://13.118.127.18/health (nginx HTTP)
+- curl -k https://13.118.127.18/health (if self-signed HTTPS)
+- Verify /docs opens
+- Verify verify-gstin and cibil/fetch flows
+
+15) Release Update Steps
+- cd /home/ubuntu/loan_engine_v2
+- source .venv/bin/activate
+- pip install -r requirements.txt
+- alembic upgrade head
+- sudo systemctl restart loan-engine
+- sudo systemctl status loan-engine
+
+16) Troubleshooting
+- If MCA returns 401: ensure ATTESTR_BASIC_AUTH_TOKEN is correct and restart service.
+- If config changes do not apply: sudo systemctl restart loan-engine.
+- Check service logs: journalctl -u loan-engine -f

@@ -1,0 +1,122 @@
+﻿Ubuntu Migration + API Setup Guide
+
+1) Server Prerequisites
+- Ubuntu 22.04/24.04 with sudo user.
+- Install packages:
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y python3 python3-venv python3-pip git curl unzip build-essential libpq-dev postgresql postgresql-contrib nginx
+- Optional firewall:
+  sudo ufw allow OpenSSH
+  sudo ufw allow "Nginx Full"
+  sudo ufw --force enable
+
+2) Copy Project to Server
+- From local machine:
+  scp -r loan_engine_v2 <user>@<server-ip>:/home/<user>/
+- On server:
+  cd /home/<user>/loan_engine_v2
+
+3) Add Project to Git (First Time)
+- cd /home/<user>/loan_engine_v2
+- git init
+- git add .
+- git commit -m "Initial commit"
+- git branch -M main
+- git remote add origin <your-git-repo-url>
+- git push -u origin main
+
+4) Python Environment + Dependencies
+- python3 -m venv .venv
+- source .venv/bin/activate
+- pip install --upgrade pip
+- pip install -r requirements.txt
+
+5) PostgreSQL Setup
+- sudo -u postgres psql
+- CREATE DATABASE loan_engine;
+- CREATE USER loan_user WITH ENCRYPTED PASSWORD 'strong_password_here';
+- GRANT ALL PRIVILEGES ON DATABASE loan_engine TO loan_user;
+
+6) .env Configuration
+Set production env values in project root .env:
+- DEBUG=false
+- LOG_LEVEL=INFO
+- DATABASE_URL=postgresql+asyncpg://loan_user:strong_password_here@localhost:5432/loan_engine
+- ANTHROPIC_API_KEY=...
+- SUREPASS_JWT_TOKEN=...
+- ATTESTR_BASIC_AUTH_TOKEN=<base64 user:pass>
+- Keep ATTESTR_AUTH_TOKEN blank if not used.
+
+7) Run Migrations
+- source .venv/bin/activate
+- alembic upgrade head
+
+8) Manual Run Test
+- uvicorn main:app --host 0.0.0.0 --port 8000
+- curl http://127.0.0.1:8000/health
+
+9) systemd Service
+Create /etc/systemd/system/loan-engine.service with:
+[Unit]
+Description=Loan Engine FastAPI Service
+After=network.target
+
+[Service]
+User=<user>
+Group=<user>
+WorkingDirectory=/home/<user>/loan_engine_v2
+Environment="PATH=/home/<user>/loan_engine_v2/.venv/bin"
+ExecStart=/home/<user>/loan_engine_v2/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
+Then run:
+- sudo systemctl daemon-reload
+- sudo systemctl enable loan-engine
+- sudo systemctl start loan-engine
+- sudo systemctl status loan-engine
+- journalctl -u loan-engine -f
+
+10) Nginx Reverse Proxy
+Create /etc/nginx/sites-available/loan-engine:
+server {
+  listen 80;
+  server_name your-domain.com;
+  client_max_body_size 20m;
+  location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+Enable:
+- sudo ln -s /etc/nginx/sites-available/loan-engine /etc/nginx/sites-enabled/loan-engine
+- sudo nginx -t
+- sudo systemctl reload nginx
+
+11) SSL
+- sudo apt install -y certbot python3-certbot-nginx
+- sudo certbot --nginx -d your-domain.com
+- sudo certbot renew --dry-run
+
+12) Validation Checklist
+- systemctl status loan-engine is active
+- curl https://your-domain.com/health works
+- /docs opens
+- verify-gstin returns PAN/CIN/DOI
+- cibil/fetch works
+- no recurring errors in journalctl
+
+13) Update/Release Process
+- cd /home/<user>/loan_engine_v2
+- pull latest code
+- source .venv/bin/activate
+- pip install -r requirements.txt
+- alembic upgrade head
+- sudo systemctl restart loan-engine

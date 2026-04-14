@@ -1,0 +1,27 @@
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# HTTP client (async)
+httpx==0.27.2
+
+# Data validation
+pydantic==2.8.2
+pydantic-settings==2.4.0
+
+# Database
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0            # PostgreSQL async driver
+alembic==1.13.3            # migrations
+
+# AI
+anthropic==0.34.2          # optional: use httpx directly or this SDK
+
+# Dev / testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+pytest-httpx==0.30.0       # mock httpx calls in tests
+faker==28.1.0
+
+# Optional: structured logging
+structlog==24.4.0

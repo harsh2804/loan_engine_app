@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB:       loan_engine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL:         "postgresql+asyncpg://postgres:password@db:5432/loan_engine"
+      ANTHROPIC_API_KEY:    "${ANTHROPIC_API_KEY}"
+      SUREPASS_JWT_TOKEN:   "${SUREPASS_JWT_TOKEN}"
+      DEBUG:                "false"
+      LOG_LEVEL:            "INFO"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./alembic:/app/alembic  # mount migrations for live updates
+
+volumes:
+  postgres_data:
