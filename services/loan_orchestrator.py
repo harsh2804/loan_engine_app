@@ -182,6 +182,7 @@ class LoanOrchestrator:
         payload = {
             "gstin": gstin,
             "pan": identity["pan"].upper(),
+            "business_name": identity.get("business_name"),
             "cin": identity.get("cin"),
             "date_of_incorporation": identity.get("date_of_incorporation"),
         }
@@ -199,6 +200,7 @@ class LoanOrchestrator:
             signup_id=signup.id,
             gstin=signup.gstin,
             pan=signup.pan,
+            business_name=signup.business_name,
             cin=signup.cin,
             date_of_incorporation=signup.date_of_incorporation,
             next_step='POST /api/v1/signup/page-1  { "signup_id": "<id>", "name": "...", "mobile": "...", "gender": "male|female|other", "date_of_birth": "YYYY-MM-DD", "individual_pan": "ABCDE1234F" }',
@@ -228,9 +230,11 @@ class LoanOrchestrator:
         }
         borrower_updates = {k: v for k, v in borrower_updates.items() if v is not None}
 
-        gst_business_nature = await self._fetch_business_nature_from_gstin(signup.gstin)
-        if gst_business_nature:
-            borrower_updates.setdefault("business_nature", gst_business_nature)
+        gst_profile = await self._fetch_business_profile_from_gstin(signup.gstin)
+        if gst_profile.get("business_nature"):
+            borrower_updates.setdefault("business_nature", gst_profile["business_nature"])
+        if gst_profile.get("business_name"):
+            borrower_updates.setdefault("business_name", gst_profile["business_name"])
 
         is_new = False
         if signup.borrower_id:
@@ -393,6 +397,11 @@ class LoanOrchestrator:
             gst_business_nature = await self._fetch_business_nature_from_gstin(borrower.gstin)
             if gst_business_nature:
                 await uow.borrowers.update(borrower.id, business_nature=gst_business_nature)
+                borrower = await uow.borrowers.get_by_id(borrower.id)
+        if borrower.business_name is None:
+            gst_business_name = await self._fetch_business_name_from_gstin(borrower.gstin)
+            if gst_business_name:
+                await uow.borrowers.update(borrower.id, business_name=gst_business_name)
                 borrower = await uow.borrowers.get_by_id(borrower.id)
 
         # Check Hard Stop A — enforced here before any application is created.
@@ -1188,6 +1197,36 @@ class LoanOrchestrator:
             return None
         return _extract_business_nature_from_gst_payload(gst_resp.data or {})
 
+    async def _fetch_business_name_from_gstin(
+        self,
+        gstin: str,
+        fetch_filings: bool = True,
+        fy: str = "2018-19",
+    ) -> Optional[str]:
+        gst_resp = await GstVerificationClient().verify_gst(
+            gstin=gstin, fetch_filings=fetch_filings, fy=fy
+        )
+        if not gst_resp.success:
+            return None
+        return _extract_business_name_from_gst_payload(gst_resp.data or {})
+
+    async def _fetch_business_profile_from_gstin(
+        self,
+        gstin: str,
+        fetch_filings: bool = True,
+        fy: str = "2018-19",
+    ) -> dict[str, Optional[str]]:
+        gst_resp = await GstVerificationClient().verify_gst(
+            gstin=gstin, fetch_filings=fetch_filings, fy=fy
+        )
+        if not gst_resp.success:
+            return {"business_nature": None, "business_name": None}
+        payload = gst_resp.data or {}
+        return {
+            "business_nature": _extract_business_nature_from_gst_payload(payload),
+            "business_name": _extract_business_name_from_gst_payload(payload),
+        }
+
     async def _resolve_borrower_identity(
         self,
         gstin: str,
@@ -1202,6 +1241,7 @@ class LoanOrchestrator:
 
         gst_payload = gst_resp.data or {}
         pan = _extract_pan_from_gst_payload(gst_payload)
+        business_name = _extract_business_name_from_gst_payload(gst_payload)
         if not pan:
             raise RuntimeError("GST verification succeeded but PAN was not present in the response.")
 
@@ -1227,6 +1267,7 @@ class LoanOrchestrator:
 
         return {
             "pan": pan,
+            "business_name": business_name,
             "cin": cin,
             "date_of_incorporation": date_of_incorporation,
         }
@@ -1270,6 +1311,20 @@ def _extract_business_nature_from_gst_payload(payload):
     if not raw:
         return None
     return _map_constitution_to_business_nature(raw)
+
+
+def _extract_business_name_from_gst_payload(payload):
+    return _find_first_string(
+        payload,
+        {
+            "legalName",
+            "legal_name",
+            "legalnameofbusiness",
+            "business_name",
+            "tradename",
+            "trade_name",
+        },
+    )
 
 
 def _map_constitution_to_business_nature(raw_value: str) -> Optional[str]:

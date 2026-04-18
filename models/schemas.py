@@ -168,6 +168,7 @@ class GstinVerifyResponse(BaseModel):
     signup_id: str
     gstin: str
     pan: str
+    business_name: Optional[str] = None
     cin: Optional[str] = None
     date_of_incorporation: Optional[str] = None
     next_step: str
