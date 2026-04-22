@@ -169,6 +169,9 @@ class GstinVerifyResponse(BaseModel):
     gstin: str
     pan: str
     business_name: Optional[str] = None
+    constitution: Optional[str] = None
+    trade_name: Optional[str] = Field(default=None, serialization_alias="tradeName")
+    address: Optional[str] = None
     cin: Optional[str] = None
     date_of_incorporation: Optional[str] = None
     next_step: str

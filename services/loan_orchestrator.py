@@ -201,6 +201,9 @@ class LoanOrchestrator:
             gstin=signup.gstin,
             pan=signup.pan,
             business_name=signup.business_name,
+            constitution=identity.get("constitution"),
+            trade_name=identity.get("trade_name"),
+            address=identity.get("address"),
             cin=signup.cin,
             date_of_incorporation=signup.date_of_incorporation,
             next_step='POST /api/v1/signup/page-1  { "signup_id": "<id>", "name": "...", "mobile": "...", "gender": "male|female|other", "date_of_birth": "YYYY-MM-DD", "individual_pan": "ABCDE1234F" }',
@@ -1242,6 +1245,9 @@ class LoanOrchestrator:
         gst_payload = gst_resp.data or {}
         pan = _extract_pan_from_gst_payload(gst_payload)
         business_name = _extract_business_name_from_gst_payload(gst_payload)
+        constitution = _extract_constitution_from_gst_payload(gst_payload)
+        trade_name = _extract_trade_name_from_gst_payload(gst_payload)
+        address = _extract_primary_address_from_gst_payload(gst_payload)
         if not pan:
             raise RuntimeError("GST verification succeeded but PAN was not present in the response.")
 
@@ -1268,6 +1274,9 @@ class LoanOrchestrator:
         return {
             "pan": pan,
             "business_name": business_name,
+            "constitution": constitution,
+            "trade_name": trade_name,
+            "address": address,
             "cin": cin,
             "date_of_incorporation": date_of_incorporation,
         }
@@ -1313,11 +1322,19 @@ def _extract_business_nature_from_gst_payload(payload):
     return _map_constitution_to_business_nature(raw)
 
 
+def _extract_constitution_from_gst_payload(payload):
+    return _find_first_string(payload, {"constitution"})
+
+
+def _extract_trade_name_from_gst_payload(payload):
+    return _find_first_string(payload, {"tradename", "trade_name"})
+
+
 def _extract_business_name_from_gst_payload(payload):
     return _find_first_string(
         payload,
         {
-            "legalName",
+            "legalname",
             "legal_name",
             "legalnameofbusiness",
             "business_name",
@@ -1325,6 +1342,36 @@ def _extract_business_name_from_gst_payload(payload):
             "trade_name",
         },
     )
+
+
+def _extract_primary_address_from_gst_payload(payload):
+    addresses = payload.get("addresses") if isinstance(payload, dict) else None
+    if not isinstance(addresses, list) or not addresses:
+        return None
+
+    primary = None
+    for entry in addresses:
+        if isinstance(entry, dict) and str(entry.get("type", "")).strip().upper() == "PRIMARY":
+            primary = entry
+            break
+    if primary is None:
+        candidate = addresses[0]
+        primary = candidate if isinstance(candidate, dict) else None
+    if not isinstance(primary, dict):
+        return None
+
+    parts = [
+        str(primary.get("building") or "").strip(),
+        str(primary.get("buildingName") or "").strip(),
+        str(primary.get("floor") or "").strip(),
+        str(primary.get("street") or "").strip(),
+        str(primary.get("locality") or "").strip(),
+        str(primary.get("district") or "").strip(),
+        str(primary.get("state") or "").strip(),
+        str(primary.get("zip") or "").strip(),
+    ]
+    cleaned = [p for p in parts if p]
+    return ", ".join(cleaned) if cleaned else None
 
 
 def _map_constitution_to_business_nature(raw_value: str) -> Optional[str]:
