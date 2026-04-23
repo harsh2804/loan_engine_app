@@ -286,7 +286,7 @@ class Borrower(TimestampMixin, Base):
 
 class Signup(TimestampMixin, Base):
     """
-    Stores PAN/GSTIN/CIN, GST legal business name, and incorporation date.
+    Stores PAN/GSTIN/CIN, GST profile details, and incorporation date.
     One row per borrower (1:1).
     """
     __tablename__ = "signups"
@@ -303,6 +303,9 @@ class Signup(TimestampMixin, Base):
     gstin: Mapped[str] = mapped_column(String(15), nullable=False, unique=True)
     pan:   Mapped[str] = mapped_column(String(10), nullable=False, unique=True)
     business_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    constitution: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    trade_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cin:   Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     date_of_incorporation: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
 

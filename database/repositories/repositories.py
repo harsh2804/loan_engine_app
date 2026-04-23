@@ -27,6 +27,10 @@ async def _upsert_signup_row(
     borrower_id: str,
     gstin: str,
     pan: str,
+    business_name: Optional[str],
+    constitution: Optional[str],
+    trade_name: Optional[str],
+    address: Optional[str],
     cin: Optional[str],
     date_of_incorporation: Optional[str],
 ) -> Signup:
@@ -39,6 +43,10 @@ async def _upsert_signup_row(
     if signup:
         signup.gstin = gstin
         signup.pan = pan
+        signup.business_name = business_name
+        signup.constitution = constitution
+        signup.trade_name = trade_name
+        signup.address = address
         signup.cin = cin
         signup.date_of_incorporation = date_of_incorporation
     else:
@@ -46,6 +54,10 @@ async def _upsert_signup_row(
             borrower_id=borrower_id,
             gstin=gstin,
             pan=pan,
+            business_name=business_name,
+            constitution=constitution,
+            trade_name=trade_name,
+            address=address,
             cin=cin,
             date_of_incorporation=date_of_incorporation,
         )
@@ -119,6 +131,10 @@ class BorrowerRepository(BaseRepository[Borrower]):
                 borrower_id=existing.id,
                 gstin=str(kwargs.get("gstin", existing.gstin)).upper(),
                 pan=pan.upper(),
+                business_name=kwargs.get("business_name"),
+                constitution=kwargs.get("constitution"),
+                trade_name=kwargs.get("trade_name"),
+                address=kwargs.get("address"),
                 cin=kwargs.get("cin") if kwargs.get("cin") is not None else existing.cin,
                 date_of_incorporation=kwargs.get("date_of_incorporation") if kwargs.get("date_of_incorporation") is not None else existing.date_of_incorporation,
             )
@@ -134,6 +150,10 @@ class BorrowerRepository(BaseRepository[Borrower]):
             borrower_id=borrower.id,
             gstin=str(kwargs["gstin"]).upper(),
             pan=pan.upper(),
+            business_name=kwargs.get("business_name"),
+            constitution=kwargs.get("constitution"),
+            trade_name=kwargs.get("trade_name"),
+            address=kwargs.get("address"),
             cin=kwargs.get("cin"),
             date_of_incorporation=kwargs.get("date_of_incorporation"),
         )
@@ -151,6 +171,10 @@ class BorrowerRepository(BaseRepository[Borrower]):
                 borrower_id=existing.id,
                 gstin=gstin.upper(),
                 pan=str(pan).upper(),
+                business_name=kwargs.get("business_name"),
+                constitution=kwargs.get("constitution"),
+                trade_name=kwargs.get("trade_name"),
+                address=kwargs.get("address"),
                 cin=kwargs.get("cin") if kwargs.get("cin") is not None else existing.cin,
                 date_of_incorporation=kwargs.get("date_of_incorporation") if kwargs.get("date_of_incorporation") is not None else existing.date_of_incorporation,
             )
@@ -166,6 +190,10 @@ class BorrowerRepository(BaseRepository[Borrower]):
             borrower_id=borrower.id,
             gstin=gstin.upper(),
             pan=str(kwargs["pan"]).upper(),
+            business_name=kwargs.get("business_name"),
+            constitution=kwargs.get("constitution"),
+            trade_name=kwargs.get("trade_name"),
+            address=kwargs.get("address"),
             cin=kwargs.get("cin"),
             date_of_incorporation=kwargs.get("date_of_incorporation"),
         )
