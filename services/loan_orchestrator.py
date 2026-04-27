@@ -36,7 +36,7 @@ from models.schemas import (
     ApplicationStartResponse,
     ConsentResponse,
     CibilScoreBreakdown, CibilResultMessage, CibilFetchResponse,
-    AAInitResponse, AAFetchResponse, BankStatementSummary,
+    AAInitResponse, AACompleteResponse, AAFetchResponse, BankStatementSummary,
     EMIODConfirmResponse,
     ProcessApplicationResponse, SafeBorrowingLimit, EngineMetrics,
     LenderMatchingSummary, LenderMatchResult, LenderRuleDetail, EMITransaction,
@@ -68,7 +68,8 @@ _ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     "CIBIL_FETCHED":       ["CIBIL_CONSENT_GIVEN"],
     "AA_CONSENT_GIVEN":    ["CIBIL_FETCHED",         "AA_CONSENT_GIVEN"],
     "AA_INIT_DONE":        ["AA_CONSENT_GIVEN"],
-    "AA_FETCHED":          ["AA_INIT_DONE"],
+    "AA_CONSENT_COMPLETED": ["AA_INIT_DONE", "AA_CONSENT_COMPLETED"],
+    "AA_FETCHED":          ["AA_CONSENT_COMPLETED"],
     "PROCESSING":          ["AA_FETCHED"],
 }
 
@@ -260,6 +261,11 @@ class LoanOrchestrator:
         if borrower is None:
             raise RuntimeError("Failed to load borrower after signup page 1.")
 
+        borrower = await self._ensure_business_vintage_months(
+            borrower,
+            date_of_incorporation=signup.date_of_incorporation,
+        )
+
         hard_stop = _hard_stop_a() if borrower.has_current_account is False else None
         missing = borrower.missing_profile_fields
 
@@ -393,11 +399,11 @@ class LoanOrchestrator:
         if borrower is None:
             raise RuntimeError("Unexpected error: borrower resolution failed.")
 
-        if borrower.business_vintage_months is None and profile_fields.get("business_vintage_months") is None:
-            derived_vintage = _business_vintage_months(signup_date_of_incorporation)
-            if derived_vintage is not None:
-                await uow.borrowers.update(borrower.id, business_vintage_months=derived_vintage)
-                borrower = await uow.borrowers.get_by_id(borrower.id)
+        borrower = await self._ensure_business_vintage_months(
+            borrower,
+            date_of_incorporation=signup_date_of_incorporation,
+            explicit_vintage_provided=profile_fields.get("business_vintage_months") is not None,
+        )
 
         if borrower.business_nature is None:
             gst_business_nature = await self._fetch_business_nature_from_gstin(borrower.gstin)
@@ -750,14 +756,49 @@ class LoanOrchestrator:
                 "Borrower must complete consent in their banking app."
             ),
             next_step=(
-                f"POST /api/v1/loan/applications/{application_id}/aa/fetch  "
-                "(after borrower completes bank consent)"
+                f"POST /api/v1/loan/applications/{application_id}/aa/complete  "
+                '{ "completed": true }  (after borrower completes bank consent)'
             ),
         )
 
     # =========================================================================
     # Step 7 — Fetch Bank Statement (no polling)
     # =========================================================================
+
+    async def complete_aa_signin(
+        self,
+        application_id: str,
+        *,
+        completed: bool = True,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> AACompleteResponse:
+        uow = self._uow
+        app = await self._get_app(application_id)
+        _guard(app.status, "AA_CONSENT_COMPLETED", "complete_aa_signin")
+
+        if not app.aa_client_id:
+            raise ValueError("No aa_client_id stored. Call /aa/init first.")
+        if not completed:
+            raise ValueError(
+                "AA sign-in/consent not completed. Submit completed=true after borrower finishes consent."
+            )
+
+        await uow.applications.set_status(application_id, "AA_CONSENT_COMPLETED")
+        await uow.audit_logs.log_event(
+            application_id=application_id,
+            event="AA_SIGNIN_CONFIRMED",
+            old_status=app.status,
+            new_status="AA_CONSENT_COMPLETED",
+            metadata={"ip": ip_address, "user_agent": user_agent},
+        )
+
+        return AACompleteResponse(
+            application_id=application_id,
+            status="AA_CONSENT_COMPLETED",
+            message="AA sign-in/consent confirmed. Ready to fetch bank statement.",
+            next_step=f"POST /api/v1/loan/applications/{application_id}/aa/fetch",
+        )
 
     async def fetch_aa(self, application_id: str) -> AAFetchResponse:
         uow = self._uow
@@ -780,6 +821,24 @@ class LoanOrchestrator:
                 failure_reason=f"AA fetch failed: {aa_resp.error}",
             )
             raise RuntimeError(f"AA fetch failed: {aa_resp.error}")
+
+        resp_data = aa_resp.data or {}
+        aa_status = (
+            (resp_data.get("status") or "")
+            or (resp_data.get("data", {}).get("status") or "")
+        ).upper()
+        if aa_status in {"PENDING", "IN_PROGRESS", "INITIATED"}:
+            raise ValueError(
+                "AA data is not ready yet (provider status=PENDING). "
+                "Ensure the borrower completes AA sign-in/consent, then call /aa/complete and retry /aa/fetch."
+            )
+        if aa_status == "FAILED":
+            await uow.applications.set_status(
+                application_id,
+                "FAILED",
+                failure_reason=f"AA session failed: {resp_data}",
+            )
+            raise RuntimeError(f"AA session failed: {resp_data}")
 
         aa_data      = parse_aa_payload(aa_resp.data)
         transactions = aa_data["transactions"]
@@ -1284,6 +1343,29 @@ class LoanOrchestrator:
             "date_of_incorporation": date_of_incorporation,
         }
 
+    async def _ensure_business_vintage_months(
+        self,
+        borrower: Any,
+        *,
+        date_of_incorporation: Optional[str],
+        explicit_vintage_provided: bool = False,
+    ):
+        if borrower is None:
+            return borrower
+        if borrower.business_vintage_months is not None or explicit_vintage_provided:
+            return borrower
+
+        derived_vintage = _business_vintage_months(date_of_incorporation)
+        if derived_vintage is None:
+            return borrower
+
+        await self._uow.borrowers.update(
+            borrower.id,
+            business_vintage_months=derived_vintage,
+        )
+        refreshed = await self._uow.borrowers.get_by_id(borrower.id)
+        return refreshed or borrower
+
 
 def _looks_like_emi(narration: str) -> bool:
     """Heuristic to detect historical EMI/OD patterns before Claude classification."""
@@ -1498,6 +1580,7 @@ def _make_cibil_breakdown(cibil: dict) -> CibilScoreBreakdown:
         total_emi_from_cibil = cibil["total_emi_from_cibil"],
         recent_enquiries_90d = cibil["recent_enquiries_90d"],
         emi_bounce_last_6m   = cibil.get("emi_bounce_last_6m"),
+        emi_bounce_last_12m  = cibil.get("emi_bounce_last_12m", cibil.get("bounce_count_12m")),
         enquiry_count_6m     = cibil.get("enquiry_count_6m"),
         max_unsecured_loan_outstanding = cibil.get("max_unsecured_loan_outstanding"),
     )

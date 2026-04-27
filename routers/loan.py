@@ -36,6 +36,7 @@ from models.schemas import (
     ConsentRequest, ConsentResponse,
     CibilFetchResponse,
     AAInitRequest, AAInitResponse,
+    AACompleteRequest, AACompleteResponse,
     AAFetchResponse,
     EMIODConfirmRequest, EMIODConfirmResponse,
     ProcessApplicationResponse,
@@ -288,6 +289,32 @@ async def init_aa(
 # =============================================================================
 
 @router.post(
+    "/loan/applications/{application_id}/aa/complete",
+    response_model=AACompleteResponse,
+    summary="Step 6b â€” Confirm borrower completed AA sign-in/consent",
+    description=(
+        "Frontend-driven gating step.\n\n"
+        "Call this only after the borrower completes AA sign-in/consent in their banking app. "
+        "This prevents the backend from attempting to fetch AA data while the session is still pending."
+    ),
+)
+async def complete_aa(
+    application_id: str,
+    request: AACompleteRequest,
+    orc: LoanOrchestrator = Depends(get_orchestrator),
+):
+    try:
+        return await orc.complete_aa_signin(
+            application_id,
+            completed=request.completed,
+            ip_address=request.ip_address,
+            user_agent=request.user_agent,
+        )
+    except Exception as exc:
+        raise _err(exc)
+
+
+@router.post(
     "/loan/applications/{application_id}/aa/fetch",
     response_model=AAFetchResponse,
     summary="Step 7 — Fetch bank statement via Account Aggregator",
@@ -417,7 +444,7 @@ async def get_audit_trail(
             id=log.id, event=log.event,
             old_status=log.old_status, new_status=log.new_status,
             actor=log.actor, created_at=log.created_at.isoformat(),
-            metadata=log.metadata,
+            metadata=log.extra_metadata,
         )
         for log in logs
     ]

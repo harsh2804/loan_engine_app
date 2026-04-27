@@ -80,7 +80,8 @@ def parse_cibil_payload(raw: dict) -> dict:
         "enquiries_last_2m":    enquiries_2m,
         "enquiry_count_6m":     enquiries_6m,
         "emi_bounce_last_6m":   bounce_6m,
-        "bounce_count_12m":     bounce_12m,
+        "emi_bounce_last_12m":  bounce_12m,
+        "bounce_count_12m":     bounce_12m,  # backward-compat (legacy key used in some UI docs)
         "delinquency_last_12m": delinquency_last_12m,
         "max_unsecured_loan_outstanding": round(max_unsecured_loan_outstanding, 2),
         "unsecured_track_emi_count": unsecured_track_emi_count,
@@ -126,6 +127,7 @@ def _minimal_summary(data: dict, score: int) -> dict:
         "enquiries_last_2m":    0,
         "enquiry_count_6m":     0,
         "emi_bounce_last_6m":   0,
+        "emi_bounce_last_12m":  0,
         "bounce_count_12m":     0,
         "delinquency_last_12m": False,
         "max_unsecured_loan_outstanding": 0.0,

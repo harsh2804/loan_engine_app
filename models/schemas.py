@@ -321,6 +321,7 @@ class CibilScoreBreakdown(BaseModel):
     total_emi_from_cibil:  float  # ₹/month — display only, not used in engine
     recent_enquiries_90d:  int
     emi_bounce_last_6m:    Optional[int] = None
+    emi_bounce_last_12m:   Optional[int] = None
     enquiry_count_6m:      Optional[int] = None
     max_unsecured_loan_outstanding: Optional[float] = None
 
@@ -375,6 +376,31 @@ class AAInitResponse(BaseModel):
     aa_client_id:   str
     status:         str
     redirect_url:   Optional[str] = None
+    message:        str
+    next_step:      str
+
+
+# =============================================================================
+# Step 6b — AA Sign-in Completion (user-driven)
+# =============================================================================
+
+class AACompleteRequest(BaseModel):
+    """
+    Frontend-driven confirmation that the borrower has completed AA sign-in/consent
+    in their banking app. This is a gating step to prevent the backend from trying
+    to fetch AA data prematurely.
+    """
+    completed: bool = Field(
+        True,
+        description="True when the borrower confirms they completed AA sign-in/consent in their banking app.",
+    )
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+
+
+class AACompleteResponse(BaseModel):
+    application_id: str
+    status:         str
     message:        str
     next_step:      str
 
