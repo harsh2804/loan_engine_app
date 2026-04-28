@@ -234,16 +234,30 @@ class HardStopResponse(BaseModel):
 # =============================================================================
 
 class ApplicationStartRequest(BaseModel):
-    borrower_pan:        str
+    individual_pan:      Optional[str] = Field(
+        None,
+        pattern=r"^[A-Za-z]{5}[0-9]{4}[A-Za-z]$",
+        description="Individual PAN (CIBIL PAN). Preferred identifier for starting an application.",
+    )
+    borrower_pan:        Optional[str] = Field(
+        None,
+        description="Deprecated: company PAN from GSTIN signup. Use individual_pan instead.",
+    )
     loan_type:           str = Field(
         ..., description="Unsecured Term Loan | Secured Term Loan",
     )
     target_loan_amount:  float = Field(..., gt=0, description="Requested loan amount in ₹")
 
-    @field_validator("borrower_pan")
+    @model_validator(mode="after")
+    def _require_pan(self) -> "ApplicationStartRequest":
+        if not self.individual_pan and not self.borrower_pan:
+            raise ValueError("individual_pan is required (borrower_pan is deprecated).")
+        return self
+
+    @field_validator("individual_pan", "borrower_pan")
     @classmethod
-    def uppercase(cls, v: str) -> str:
-        return v.upper()
+    def uppercase(cls, v: Optional[str]) -> Optional[str]:
+        return v.upper() if v else v
 
     @field_validator("loan_type")
     @classmethod

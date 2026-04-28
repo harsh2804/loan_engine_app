@@ -458,16 +458,16 @@ class LoanOrchestrator:
 
     async def start_application(
         self,
-        borrower_pan:       str,
+        individual_pan:     str,
         loan_type:          str,
         target_loan_amount: float,
     ) -> ApplicationStartResponse:
         uow = self._uow
 
-        borrower = await uow.borrowers.get_by_pan(borrower_pan)
+        borrower = await uow.borrowers.get_by_individual_pan(individual_pan)
         if not borrower:
             raise ValueError(
-                f"Borrower '{borrower_pan}' not found. "
+                f"Borrower '{individual_pan}' not found. "
                 "Register via POST /api/v1/borrowers/register first."
             )
 

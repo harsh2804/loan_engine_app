@@ -164,8 +164,11 @@ async def start_application(
     orc: LoanOrchestrator = Depends(get_orchestrator),
 ):
     try:
+        individual_pan = request.individual_pan or request.borrower_pan
+        if not individual_pan:
+            raise ValueError("individual_pan is required (borrower_pan is deprecated).")
         return await orc.start_application(
-            borrower_pan       = request.borrower_pan,
+            individual_pan     = individual_pan,
             loan_type          = request.loan_type,
             target_loan_amount = request.target_loan_amount,
         )

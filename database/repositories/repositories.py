@@ -94,6 +94,20 @@ class BorrowerRepository(BaseRepository[Borrower]):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_individual_pan(self, individual_pan: str) -> Optional[Borrower]:
+        stmt = (
+            select(Borrower)
+            .join(Borrower.signup)
+            .options(selectinload(Borrower.signup))
+            .where(
+                Borrower.individual_pan == individual_pan.upper(),
+                Borrower.deleted_at.is_(None),
+                Signup.deleted_at.is_(None),
+            )
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_gstin(self, gstin: str) -> Optional[Borrower]:
         stmt = (
             select(Borrower)
