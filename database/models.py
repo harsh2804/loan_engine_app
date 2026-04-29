@@ -77,6 +77,7 @@ class ApplicationStatusEnum(str, py_enum.Enum):
     cibil_otp_sent       = "CIBIL_OTP_SENT"
     cibil_fetched        = "CIBIL_FETCHED"
     aa_consent_given     = "AA_CONSENT_GIVEN"
+    aa_consent_completed = "AA_CONSENT_COMPLETED"
     aa_init_done         = "AA_INIT_DONE"
     aa_fetched           = "AA_FETCHED"
     processing           = "PROCESSING"
