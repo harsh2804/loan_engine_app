@@ -432,6 +432,7 @@ class BankStatementSummary(BaseModel):
     active_credit_days:  int
     has_historical_emi:  bool    # True = engine detected EMI/OD patterns
     historical_emi_amt:  float   # estimated monthly amount from historical patterns
+    emi_paid_unpaid:     bool
 
 
 class AAFetchResponse(BaseModel):
@@ -440,6 +441,7 @@ class AAFetchResponse(BaseModel):
     bank_summary:        BankStatementSummary
     # Set if historical EMI/OD detected — triggers Mizan's conditional question
     emi_confirmation_required: bool
+    emi_paid_unpaid:     bool
     message:             str
     next_step:           str
 

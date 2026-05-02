@@ -856,6 +856,25 @@ class LoanOrchestrator:
         has_historical_emi = len(emi_txns_raw) > 0
         historical_emi_amt = sum(t["amount"] for t in emi_txns_raw[:3]) / max(len(emi_txns_raw[:3]), 1) if has_historical_emi else 0.0
 
+        # ── EMI Paid/Unpaid Evaluation ────────────────────────────────────────
+        # Set emi_paid_unpaid = true ONLY IF:
+        # Borrower has successfully paid EMIs for the last N months (N=2), AND
+        # There is NO EMI debit transaction in: Current month, OR Previous month
+        N_MONTHS_EMI_PAID = 2
+        emi_months_set = {t["transaction_date"][:7] for t in emi_txns_raw}
+        
+        emi_paid_unpaid = False
+        if dates and len(emi_months_set) >= N_MONTHS_EMI_PAID:
+            all_months_sorted = sorted(list(months_set))
+            current_month = all_months_sorted[-1]
+            previous_month = all_months_sorted[-2] if len(all_months_sorted) > 1 else None
+            
+            no_emi_current = current_month not in emi_months_set
+            no_emi_previous = previous_month is not None and previous_month not in emi_months_set
+            
+            if no_emi_current or no_emi_previous:
+                emi_paid_unpaid = True
+
         await uow.applications.update(
             application_id,
             bank_metrics={
@@ -893,8 +912,10 @@ class LoanOrchestrator:
                 active_credit_days  = active_days,
                 has_historical_emi  = has_historical_emi,
                 historical_emi_amt  = round(historical_emi_amt, 2),
+                emi_paid_unpaid     = emi_paid_unpaid,
             ),
             emi_confirmation_required = has_historical_emi,
+            emi_paid_unpaid           = emi_paid_unpaid,
             message=(
                 f"Bank statement fetched: {len(transactions)} transactions "
                 f"across {len(months_set)} months."
