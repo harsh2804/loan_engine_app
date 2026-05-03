@@ -234,11 +234,11 @@ class HardStopResponse(BaseModel):
 # =============================================================================
 
 class ApplicationStartRequest(BaseModel):
-    # individual_pan:      Optional[str] = Field(
-    #     None,
-    #     pattern=r"^[A-Za-z]{5}[0-9]{4}[A-Za-z]$",
-    #     description="Individual PAN (CIBIL PAN). Preferred identifier for starting an application.",
-    # )
+    individual_pan:      Optional[str] = Field(
+        None,
+        pattern=r"^[A-Za-z]{5}[0-9]{4}[A-Za-z]$",
+        description="Individual PAN (CIBIL PAN). Preferred identifier for starting an application.",
+    )
     borrower_pan:        Optional[str] = Field(
         None,
         description="Deprecated: company PAN from GSTIN signup. Use individual_pan instead.",

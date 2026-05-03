@@ -19,7 +19,7 @@ Public API:
 from __future__ import annotations
 import math
 
-DEFAULT_MONTHLY_INTEREST_RATE = 0.015 #0.00125
+DEFAULT_MONTHLY_INTEREST_RATE = 0.00125
 """
 PDF v1.2 documents "1.5% per month (fixed)", but the numeric examples in the
 PDF match 1.5% per *year* (i.e. 0.125% per month = 0.00125).
