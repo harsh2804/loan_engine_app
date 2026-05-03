@@ -234,11 +234,11 @@ class HardStopResponse(BaseModel):
 # =============================================================================
 
 class ApplicationStartRequest(BaseModel):
-    individual_pan:      Optional[str] = Field(
-        None,
-        pattern=r"^[A-Za-z]{5}[0-9]{4}[A-Za-z]$",
-        description="Individual PAN (CIBIL PAN). Preferred identifier for starting an application.",
-    )
+    # individual_pan:      Optional[str] = Field(
+    #     None,
+    #     pattern=r"^[A-Za-z]{5}[0-9]{4}[A-Za-z]$",
+    #     description="Individual PAN (CIBIL PAN). Preferred identifier for starting an application.",
+    # )
     borrower_pan:        Optional[str] = Field(
         None,
         description="Deprecated: company PAN from GSTIN signup. Use individual_pan instead.",
@@ -477,10 +477,13 @@ class EngineMetrics(BaseModel):
     """Full set of deterministic engine outputs (PDF spec)."""
     total_credit_inflow:          float
     active_days:                  int
-    detected_existing_emi:        float   # effective EMI from AA bank statement
+    detected_existing_emi:        float   # combined existing EMI (bureau + bank, deduped)
 
     abb_daily:                    float
     bto_monthly_avg:              float
+    bto_ratio_pct:                Optional[float] = None
+    monthly_banking_credit:       float
+    minimum_transaction_frequency_per_month: Optional[float] = None
 
     median_monthly_flow:          float
     std_dev:                      float
@@ -514,6 +517,8 @@ class EngineMetrics(BaseModel):
     risk_band:                    str
     tenure_multiplier:            int
     safe_loan_amount:             float
+
+    minimum_itr_income_annual:    Optional[float] = None
 
 
 class EMITransaction(BaseModel):
@@ -575,6 +580,18 @@ class LenderMatchingSummary(BaseModel):
     lender_match_insight: str  # Claude's 1-sentence summary for this section
 
 
+class OriginalRequestImpact(BaseModel):
+    """
+    v1.2 "Your Original Request" module:
+      - EMI Amount for requested loan
+      - Remaining Monthly Surplus (stress surplus - requested EMI)
+      - Risk level (requested EMI vs safe EMI)
+    """
+    emi_amount:                float
+    remaining_monthly_surplus: float
+    risk_level:                str
+
+
 class ProcessApplicationResponse(BaseModel):
     """
     Step 8 combined response.
@@ -590,6 +607,7 @@ class ProcessApplicationResponse(BaseModel):
 
     safe_borrowing_limit: SafeBorrowingLimit
     lender_matching:      LenderMatchingSummary
+    original_request:     Optional[OriginalRequestImpact] = None
 
 
 # =============================================================================

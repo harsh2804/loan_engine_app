@@ -38,22 +38,34 @@ from models.schemas import (
     CibilScoreBreakdown, CibilResultMessage, CibilFetchResponse,
     AAInitResponse, AACompleteResponse, AAFetchResponse, BankStatementSummary,
     EMIODConfirmResponse,
-    ProcessApplicationResponse, SafeBorrowingLimit, EngineMetrics,
+    ProcessApplicationResponse, SafeBorrowingLimit, EngineMetrics, OriginalRequestImpact,
     LenderMatchingSummary, LenderMatchResult, LenderRuleDetail, EMITransaction,
     HardStopResponse,
 )
 from services.external.aa_client    import AccountAggregatorClient
 from services.external.cibil_client import CibilClient
 from services.external.gst_client import GstVerificationClient
+from services.external.itr_client import ItrTurnoverClient
 from services.external.mca_client import McaGstinClient
 from services.transaction_classifier import classify_transactions, build_classification_index
-from services.loan_engine   import run_engine, compute_monthly_emi_from_bank
+from services.loan_engine   import (
+    run_engine,
+    banking_turnover_ratio_pct,
+    emi_from_loan_amount,
+    requested_loan_risk_level,
+ )
+from services.existing_emi import (
+    bank_emi_items_from_transactions,
+    bureau_emi_items_from_cibil_accounts,
+    compute_existing_emi,
+)
 from services.summarizer    import generate_decision_summary
 from utils.aa_parser        import (
     parse_aa_payload, aggregate_monthly_credits,
     compute_daily_balances, count_active_days,
 )
 from utils.cibil_parser import parse_cibil_payload
+from utils.itr_parser import parse_itr_turnover_payload
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -1016,12 +1028,14 @@ class LoanOrchestrator:
         daily_balances  = compute_daily_balances(raw_txns)
         active_days     = count_active_days(raw_txns)
 
-        # ── EMI source: Account Aggregator only ──────────────────────────────
-        # CIBIL total_emi_from_cibil is shown on the result card but does NOT
-        # feed the engine.  The engine always uses AA-detected EMIs from
-        # Claude-labelled DEBIT transactions (is_emi_obligation=True).
+        # ── Existing EMI (v1.2): Bureau + Bank, deduplicated ─────────────────
+        # Bank statement analysis detects recurring debits (Claude labels).
+        # CIBIL gives EMI obligations from active tradelines.
         #
-        # All AA-detected EMI transactions (for the result card + deduplication)
+        # v1.2 requires deduplication across sources: lender name match AND
+        # EMI difference ≤ 5% → count once (bank amount kept).
+        #
+        # All AA-detected EMI transactions (for result card visibility)
         all_emi_txns = [
             t for t in raw_txns
             if t["type"] == "DEBIT"
@@ -1047,8 +1061,10 @@ class LoanOrchestrator:
             # Include all AA-detected EMIs (historical + current)
             emi_txns = all_emi_txns
 
-        # Deduplicate (lender, amount) pairs → monthly EMI figure from AA
-        effective_emi = compute_monthly_emi_from_bank(emi_txns, cls_index)
+        bank_emi_items = bank_emi_items_from_transactions(emi_txns, cls_index)
+        bureau_emi_items = bureau_emi_items_from_cibil_accounts(cibil.get("raw_accounts") or [])
+        emi_merge = compute_existing_emi(bureau_items=bureau_emi_items, bank_items=bank_emi_items)
+        effective_emi = emi_merge.total
 
         engine = run_engine(
             monthly_credits         = monthly_credits,
@@ -1067,13 +1083,49 @@ class LoanOrchestrator:
         ]
         current_account_count = len(current_accounts) if aa_accounts else None
         account_type = _aa_account_type(aa_summary)
-        txn_frequency = round(len(raw_txns) / max(len(monthly_credits), 1), 2) if raw_txns else None
+        months_in_statement = len({t["transaction_date"][:7] for t in raw_txns if t.get("transaction_date")}) if raw_txns else 0
+        txn_frequency = round(len(raw_txns) / max(months_in_statement, 1), 2) if raw_txns else None
         account_vintage = _bank_account_vintage_months(raw_txns, aa_summary)
         statement_months = bank_metrics.get("statement_months") or len(monthly_credits)
         risk_band = (engine["risk_band"] or "High Risk").replace(" Risk", "")
         unsecured_track_ratio = None
         if app.target_loan_amount and app.target_loan_amount > 0:
             unsecured_track_ratio = (cibil.get("max_unsecured_loan_outstanding") or 0.0) / app.target_loan_amount
+
+        # ── Turnover + derived income (v1.2) ────────────────────────────────
+        turnover_annual: Optional[float] = None
+        derived_itr_income_annual: Optional[float] = None
+        margin_pct = _margin_pct(borrower.business_nature)
+        try:
+            birth_or_incorp = _to_ddmmyyyy(borrower.date_of_incorporation)
+            itr_pan = (borrower.individual_pan or borrower.pan or "").strip()
+            if itr_pan and borrower.business_name and birth_or_incorp:
+                itr_resp = await ItrTurnoverClient(audit_callback=audit_cb).fetch_turnover(
+                    pan=itr_pan,
+                    birth_or_incorporated_date=birth_or_incorp,
+                    name=borrower.business_name,
+                    application_id=application_id,
+                )
+                itr_summary = parse_itr_turnover_payload(itr_resp.data if itr_resp.success else None)
+                turnover_annual = itr_summary.gross_turnover_annual
+        except Exception:
+            turnover_annual = None
+
+        if turnover_annual is not None and margin_pct is not None:
+            derived_itr_income_annual = turnover_annual * margin_pct
+
+        engine["monthly_banking_credit"] = engine["median_monthly_flow"]
+        engine["minimum_transaction_frequency_per_month"] = txn_frequency
+        engine["minimum_itr_income_annual"] = derived_itr_income_annual
+
+        bto_ratio = banking_turnover_ratio_pct(
+            monthly_banking_credit=engine["bto_monthly_avg"],
+            annual_turnover=turnover_annual,
+        )
+        if bto_ratio is not None:
+            engine["bto_ratio_pct"] = round(bto_ratio, 2)
+        else:
+            engine["bto_ratio_pct"] = None
 
         ctx = LenderContext(
             loan_type                = "unsecured" if app.loan_type == "Unsecured Term Loan" else "secured",
@@ -1096,6 +1148,7 @@ class LoanOrchestrator:
             active_unsecured_loans   = cibil.get("active_unsecured_loans"),
             enquiries_last_2m        = cibil.get("enquiries_last_2m"),
             existing_emi_monthly     = effective_emi,
+            proposed_emi_monthly     = engine["stress_emi"],
             unsecured_track_emi_count = cibil.get("unsecured_track_emi_count"),
             unsecured_track_loan_ratio = unsecured_track_ratio,
             max_unsecured_loan_outstanding = cibil.get("max_unsecured_loan_outstanding"),
@@ -1111,8 +1164,8 @@ class LoanOrchestrator:
             volatility_cv            = engine["volatility_index"],
             risk_band                = risk_band,
             safe_loan_amount         = engine["safe_loan_amount"],
-            itr_income_annual        = None,
-            gst_turnover_annual      = None,
+            itr_income_annual        = derived_itr_income_annual,
+            gst_turnover_annual      = turnover_annual,
             gst_compliance_status    = None,
             gst_filing_regularity_months = None,
         )
@@ -1130,7 +1183,7 @@ class LoanOrchestrator:
             borrower_name      = borrower.name,
             cibil_score        = cibil["score"],
             overdue_amount     = cibil["overdue_amount"],
-            effective_emi_aa   = effective_emi,   # AA is the sole EMI source
+            effective_emi_monthly = effective_emi,
             median_inflow      = engine["median_monthly_flow"],
             volatility_index   = engine["volatility_index"],
             volatility_interp  = engine["volatility_interpretation"],
@@ -1173,6 +1226,9 @@ class LoanOrchestrator:
             detected_existing_emi        = engine["detected_existing_emi"],
             abb_daily                    = engine["abb_daily"],
             bto_monthly_avg              = engine["bto_monthly_avg"],
+            bto_ratio_pct                = engine.get("bto_ratio_pct"),
+            monthly_banking_credit       = engine["monthly_banking_credit"],
+            minimum_transaction_frequency_per_month = engine.get("minimum_transaction_frequency_per_month"),
             median_monthly_flow          = engine["median_monthly_flow"],
             std_dev                      = engine["std_dev"],
             volatility_index             = engine["volatility_index"],
@@ -1199,6 +1255,7 @@ class LoanOrchestrator:
             risk_band                    = engine["risk_band"],
             tenure_multiplier            = engine["tenure_multiplier"],
             safe_loan_amount             = engine["safe_loan_amount"],
+            minimum_itr_income_annual    = engine.get("minimum_itr_income_annual"),
         )
 
         return ProcessApplicationResponse(
@@ -1206,6 +1263,8 @@ class LoanOrchestrator:
             borrower_name        = borrower.name,
             loan_type            = app.loan_type or "",
             target_loan_amount   = target_amt,
+            annual_turnover      = turnover_annual,
+            existing_emi         = effective_emi,
             status               = "COMPLETED",
             processing_time_ms   = elapsed,
             safe_borrowing_limit = SafeBorrowingLimit(
@@ -1214,7 +1273,8 @@ class LoanOrchestrator:
                 tenure_months         = engine["tenure_multiplier"],
                 risk_band             = engine["risk_band"],
                 avg_monthly_inflow    = engine["bto_monthly_avg"],
-                existing_emi          = effective_emi,  # from AA bank statement
+                existing_emi          = effective_emi,  # bureau + bank, deduped
+                annual_turnover       = turnover_annual,
                 is_target_achievable  = engine["safe_loan_amount"] >= target_amt,
                 engine_metrics        = engine_metrics,
                 claude_insights       = insights.safe_borrowing_bullets,
@@ -1227,6 +1287,14 @@ class LoanOrchestrator:
                     )
                     for t in emi_txns
                 ],
+            ),
+            original_request=(
+                None if not target_amt or target_amt <= 0 else _original_request_impact(
+                    requested_loan_amount=target_amt,
+                    tenure_months=engine["tenure_multiplier"],
+                    stress_survival_surplus=engine["stress_survival_surplus"],
+                    final_safe_emi=engine["final_safe_emi"],
+                )
             ),
             lender_matching = LenderMatchingSummary(
                 eligible_lenders     = eligible_names,
@@ -1495,6 +1563,61 @@ def _map_constitution_to_business_nature(raw_value: str) -> Optional[str]:
     if "trader" in value or "trading" in value:
         return "Trader"
     return None
+
+
+def _margin_pct(business_nature: Optional[str]) -> Optional[float]:
+    """
+    v1.2 margin table (used to derive net income and minimum ITR income).
+    Returns a decimal fraction (e.g. 0.15 for 15%).
+    """
+    if not business_nature:
+        return None
+    raw = str(business_nature).strip().lower()
+    if raw == "retailer":
+        return 0.10
+    if raw == "wholesaler":
+        return 0.06
+    if raw in {"wholesaler & retailer", "retailer and wholesaler", "retailer & wholesaler"}:
+        return 0.08
+    if raw == "manufacturer":
+        return 0.15
+    if raw == "trader":
+        return 0.06
+    return None
+
+
+def _to_ddmmyyyy(date_yyyy_mm_dd: Optional[str]) -> Optional[str]:
+    """
+    Attestr ITR API expects DD/MM/YYYY, while we store YYYY-MM-DD.
+    """
+    if not date_yyyy_mm_dd:
+        return None
+    raw = str(date_yyyy_mm_dd).strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.strptime(raw[:10], "%Y-%m-%d")
+        return dt.strftime("%d/%m/%Y")
+    except ValueError:
+        return None
+
+
+def _original_request_impact(
+    *,
+    requested_loan_amount: float,
+    tenure_months: int,
+    stress_survival_surplus: float,
+    final_safe_emi: float,
+) -> OriginalRequestImpact:
+    requested_emi = emi_from_loan_amount(requested_loan_amount, tenure_months=tenure_months)
+    remaining = (stress_survival_surplus or 0.0) - (requested_emi or 0.0)
+    stress_ratio = (requested_emi / final_safe_emi) if final_safe_emi and final_safe_emi > 0 else None
+    level = requested_loan_risk_level(stress_ratio) or "High Risk"
+    return OriginalRequestImpact(
+        emi_amount=round(requested_emi, 2),
+        remaining_monthly_surplus=round(remaining, 2),
+        risk_level=level,
+    )
 
 
 def _extract_cin_from_mca_payload(payload):

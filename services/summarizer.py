@@ -66,7 +66,7 @@ async def generate_decision_summary(
     # CIBIL facts
     cibil_score:        int,
     overdue_amount:     float,
-    effective_emi_aa:   float,   # EMI figure from AA bank statement (sole source)
+    effective_emi_monthly: float,   # Combined existing EMI (bureau + bank, deduped)
     median_inflow:      float,
     volatility_index:   float,
     volatility_interp:  str,
@@ -92,7 +92,7 @@ async def generate_decision_summary(
         "borrower_name":             borrower_name,
         "cibil_score":               cibil_score,
         "overdue_amount_inr":        round(overdue_amount),
-        "monthly_emi_from_bank_inr": round(effective_emi_aa),  # AA-sourced, used in engine
+        "existing_emi_monthly_inr":  round(effective_emi_monthly),
         "median_monthly_revenue_inr": round(median_inflow),
         "volatility_index_cv":       round(volatility_index, 3),
         "income_stability":          volatility_interp,

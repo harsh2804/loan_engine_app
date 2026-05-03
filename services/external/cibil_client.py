@@ -61,7 +61,6 @@ class CibilClient(BaseApiClient):
             "gender":  normalized_gender,
             "consent": consent,
         }
-        print("body is ", body)
         return await self._post(
             self.ENDPOINT,
             body,

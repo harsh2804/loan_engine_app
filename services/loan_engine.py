@@ -19,6 +19,14 @@ Public API:
 from __future__ import annotations
 import math
 
+DEFAULT_MONTHLY_INTEREST_RATE = 0.015 #0.00125
+"""
+PDF v1.2 documents "1.5% per month (fixed)", but the numeric examples in the
+PDF match 1.5% per *year* (i.e. 0.125% per month = 0.00125).
+
+We use the example-consistent monthly rate here.
+"""
+
 
 # =============================================================================
 # Interpretation tables (from PDF)
@@ -128,8 +136,17 @@ def run_engine(
     combined_mult     = vol_mult * conc_mult * vin_mult * qoq_mult
     risk_band, tenure = _risk_band(combined_mult)
 
-    # ── Safe Loan Amount = Final Safe EMI × Tenure (rounded to ₹10k) ─────────
-    safe_loan = _round_to(final_safe_emi * tenure, 10_000)
+    # ── Safe Loan Amount (principal) derived from EMI, rate, and tenure ──────
+    # P = EMI × ((1+r)^n − 1) / (r × (1+r)^n)
+    # (rounded to ₹10k for UI stability)
+    safe_loan = _round_to(
+        loan_amount_from_emi(
+            final_safe_emi,
+            tenure_months=tenure,
+            monthly_interest_rate=DEFAULT_MONTHLY_INTEREST_RATE,
+        ),
+        10_000,
+    )
 
     return {
         # ── Input echoes ──────────────────────────────────────────────────────
@@ -203,6 +220,85 @@ def compute_monthly_emi_from_bank(
     return total
 
 
+def loan_amount_from_emi(
+    emi: float,
+    *,
+    tenure_months: int,
+    monthly_interest_rate: float = DEFAULT_MONTHLY_INTEREST_RATE,
+) -> float:
+    """
+    Convert EMI → principal using standard amortization PV.
+    Returns 0 for non-positive EMI or tenure.
+    """
+    if emi <= 0 or tenure_months <= 0:
+        return 0.0
+    r = monthly_interest_rate
+    if r <= 0:
+        return emi * tenure_months
+    factor = (1 + r) ** tenure_months
+    denom = r * factor
+    if denom <= 0:
+        return 0.0
+    return emi * (factor - 1) / denom
+
+
+def emi_from_loan_amount(
+    principal: float,
+    *,
+    tenure_months: int,
+    monthly_interest_rate: float = DEFAULT_MONTHLY_INTEREST_RATE,
+) -> float:
+    """
+    Convert principal → EMI using standard amortization.
+    Returns 0 for non-positive principal or tenure.
+    """
+    if principal <= 0 or tenure_months <= 0:
+        return 0.0
+    r = monthly_interest_rate
+    if r <= 0:
+        return principal / tenure_months
+    factor = (1 + r) ** tenure_months
+    denom = factor - 1
+    if denom <= 0:
+        return 0.0
+    return principal * r * factor / denom
+
+
+def banking_turnover_ratio_pct(
+    *,
+    monthly_banking_credit: float,
+    annual_turnover: float | None,
+) -> float | None:
+    """
+    Banking Turnover Ratio (v1.2):
+      (Monthly Banking Credit / Monthly Turnover) * 100
+    """
+    if annual_turnover is None or annual_turnover <= 0:
+        return None
+    if monthly_banking_credit < 0:
+        return None
+    monthly_turnover = annual_turnover / 12
+    if monthly_turnover <= 0:
+        return None
+    return (monthly_banking_credit / monthly_turnover) * 100
+
+
+def requested_loan_risk_level(stress_ratio: float | None) -> str | None:
+    """
+    v1.2 "Your Original Request" classification:
+      ratio ≤ 1.0        → Low Risk
+      1.0 – 1.4          → Moderate Risk
+      1.4 – 1.8 (and up) → High Risk
+    """
+    if stress_ratio is None:
+        return None
+    if stress_ratio <= 1.0:
+        return "Low Risk"
+    if stress_ratio <= 1.4:
+        return "Moderate Risk"
+    return "High Risk"
+
+
 # =============================================================================
 # Private helpers
 # =============================================================================
@@ -265,9 +361,13 @@ def _risk_band(combined: float) -> tuple[str, int]:
     Risk Band = product of all 4 multipliers.
     Returns (band_name, tenure_multiplier).
     """
-    if combined >= 0.75:  return "Low Risk",    24
-    if combined >= 0.55:  return "Medium Risk", 20
-    return                       "High Risk",   18
+    # PDF v1.2 tenure bands:
+    #   Low    → 48 months
+    #   Medium → 36 months
+    #   High   → 24 months
+    if combined >= 0.75:  return "Low Risk",    48
+    if combined >= 0.55:  return "Medium Risk", 36
+    return                       "High Risk",   24
 
 
 def _round_to(value: float, nearest: int) -> float:

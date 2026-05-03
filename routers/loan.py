@@ -164,7 +164,7 @@ async def start_application(
     orc: LoanOrchestrator = Depends(get_orchestrator),
 ):
     try:
-        individual_pan = request.individual_pan or request.borrower_pan
+        individual_pan = request.individual_pan #or request.borrower_pan
         if not individual_pan:
             raise ValueError("individual_pan is required (borrower_pan is deprecated).")
         return await orc.start_application(
@@ -351,8 +351,9 @@ async def fetch_aa(
         "Only call this if Step 7 returns `emi_confirmation_required=true`.\n\n"
         "Mizan script: 'I noticed EMI or overdraft payments in your bank statement up until "
         "about 3 months ago. Are these obligations fully settled now?'\n\n"
-        "If `settled=true`: only CIBIL EMI is used in the engine.\n"
-        "If `settled=false`: bank-detected EMI is also included (higher obligation)."
+        "If `settled=true`: historical bank EMIs older than ~3 months are ignored.\n"
+        "If `settled=false`: all bank-detected EMIs are considered.\n\n"
+        "In both cases, bureau (CIBIL) + bank EMIs are deduplicated per v1.2 rules."
     ),
 )
 async def confirm_emi_od(

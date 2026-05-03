@@ -35,6 +35,7 @@ class LenderContext:
     active_unsecured_loans: Optional[int] = None
     enquiries_last_2m: Optional[int] = None
     existing_emi_monthly: float = 0.0
+    proposed_emi_monthly: Optional[float] = None
     unsecured_track_emi_count: Optional[int] = None
     unsecured_track_loan_ratio: Optional[float] = None
     max_unsecured_loan_outstanding: Optional[float] = None
@@ -80,6 +81,8 @@ class LenderContext:
             errors.append("payment_delayed_days cannot be negative")
         if self.existing_emi_monthly < 0:
             errors.append("existing_emi_monthly cannot be negative")
+        if self.proposed_emi_monthly is not None and self.proposed_emi_monthly < 0:
+            errors.append("proposed_emi_monthly cannot be negative")
         if self.abb_daily < 0 or self.bto_monthly < 0 or self.median_monthly_flow < 0:
             errors.append("banking metrics cannot be negative")
         if self.volatility_cv < 0:
@@ -107,7 +110,8 @@ class LenderContext:
         if not self.itr_income_annual or self.itr_income_annual <= 0:
             return None
         monthly_income = self.itr_income_annual / 12
-        return self.existing_emi_monthly / monthly_income if monthly_income > 0 else None
+        obligations = self.existing_emi_monthly + (self.proposed_emi_monthly or 0.0)
+        return obligations / monthly_income if monthly_income > 0 else None
 
 
 @dataclass(frozen=True)
