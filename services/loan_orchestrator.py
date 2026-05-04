@@ -587,6 +587,9 @@ class LoanOrchestrator:
         if not borrower.individual_pan:
             raise ValueError("Individual PAN missing. Capture it during signup before fetching CIBIL.")
 
+        # Restriction: CIBIL can be fetched once per month per borrower.
+        await uow.borrowers.consume_cibil_fetch_quota(borrower.id)
+
         async def audit_cb(**kwargs):
             await uow.api_logs.log_call(application_id=application_id, **kwargs)
 
@@ -996,6 +999,9 @@ class LoanOrchestrator:
             raise ValueError("CIBIL data missing. Complete Steps 3–4 first.")
         if not raw_txns:
             raise ValueError("Bank statement missing. Complete Steps 5–7 first.")
+
+        # Restriction: Loan Engine can be used up to 3 times per month per borrower.
+        await uow.borrowers.consume_engine_run_quota(borrower.id)
 
         await uow.applications.set_status(application_id, "PROCESSING")
 
