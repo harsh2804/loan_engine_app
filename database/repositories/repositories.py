@@ -238,7 +238,7 @@ class BorrowerRepository(BaseRepository[Borrower]):
         if not quota.allowed:
             raise ValueError(
                 f"Loan Engine limit reached: {limit} runs per month. "
-                f"Resets on {quota.next_reset_date}."
+                f"Resets on {quota.next_reset_date}. (AA usage is unlimited.)"
             )
 
         borrower.engine_runs_month = quota.state.month
