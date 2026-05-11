@@ -565,3 +565,166 @@ async def list_lenders():
     from lenders.registry import registry
     lenders = registry.list_lenders()
     return {"lenders": lenders, "total_count": len(lenders)}
+
+
+# =============================================================================
+# Samples (debug/testing)
+# =============================================================================
+
+@router.get(
+    "/samples/process",
+    response_model=ProcessApplicationResponse,
+    summary="Sample Step 8 response (dummy values)",
+)
+async def sample_process_response():
+    return {
+        "application_id": "app_dummy_0001",
+        "borrower_name": "Test Borrower",
+        "loan_type": "Unsecured Term Loan",
+        "target_loan_amount": 1200000,
+        "status": "COMPLETED",
+        "processing_time_ms": 842.6,
+        "safe_borrowing_limit": {
+            "safe_loan_amount": 1500000,
+            "monthly_emi": 52000,
+            "tenure_months": 36,
+            "risk_band": "Medium Risk",
+            "avg_monthly_inflow": 850000,
+            "existing_emi": 12000,
+            "is_target_achievable": True,
+            "engine_metrics": {
+                "total_credit_inflow": 10200000,
+                "active_days": 210,
+                "detected_existing_emi": 12000,
+                "abb_daily": 65000,
+                "bto_monthly_avg": 850000,
+                "bto_ratio_pct": 8.33,
+                "monthly_banking_credit": 850000,
+                "minimum_transaction_frequency_per_month": 12,
+                "median_monthly_flow": 780000,
+                "std_dev": 95000,
+                "volatility_index": 0.12,
+                "volatility_interpretation": "Stable",
+                "revenue_concentration_pct": 22.5,
+                "concentration_interpretation": "Healthy diversification",
+                "qoq_pct": 6.5,
+                "active_days_ratio": 0.58,
+                "active_days_interpretation": "Healthy activity",
+                "operating_buffer": 180000,
+                "survival_surplus": 165000,
+                "base_safe_emi": 61000,
+                "volatility_multiplier": 0.95,
+                "concentration_multiplier": 0.98,
+                "vintage_multiplier": 0.92,
+                "qoq_multiplier": 1.02,
+                "combined_risk_multiplier": 0.88,
+                "emi_after_penalties": 53680,
+                "stress_inflow": 720000,
+                "stress_operating_buffer": 150000,
+                "stress_survival_surplus": 138000,
+                "stress_emi": 56000,
+                "final_safe_emi": 52000,
+                "risk_band": "Medium Risk",
+                "tenure_multiplier": 36,
+                "safe_loan_amount": 1500000,
+                "minimum_itr_income_annual": 400000
+            },
+            "claude_insights": [
+                "Your cashflows look stable with low month-to-month volatility.",
+                "Existing EMI obligations are manageable relative to your inflows.",
+                "Your bank balance buffer reduces repayment risk.",
+                "A 36-month tenure keeps EMI within a safe range.",
+                "This amount targets approval likelihood while avoiding over-leverage."
+            ],
+            "detected_emi_transactions": [
+                {
+                    "transaction_id": "txn_001",
+                    "amount": 12000,
+                    "narration": "EMI - LOAN PAYMENT",
+                    "emi_lender": "HDFC Bank"
+                }
+            ]
+        },
+        "lender_matching": {
+            "eligible_lenders": [
+                "Dummy Lenient (Test)",
+                "Flexiloans"
+            ],
+            "ineligible_lenders": [
+                "Dummy Strict (Test)",
+                "Piramal UBL Standard",
+                "Piramal UBL+",
+                "Piramal UBL Gold"
+            ],
+            "results": [
+                {
+                    "lender_name": "Dummy Lenient (Test)",
+                    "likely_to_approve": True,
+                    "fail_reason": None,
+                    "all_fail_reasons": [],
+                    "pass_count": 6,
+                    "fail_count": 0,
+                    "rule_details": [
+                        {"rule": "loan_type", "passed": True, "reason": None, "value": "unsecured", "threshold": "unsecured", "stage": "check_1", "skipped": False},
+                        {"rule": "loan_amount_range", "passed": True, "reason": None, "value": 1200000, "threshold": [1, 10000000], "stage": "check_1", "skipped": False},
+                        {"rule": "borrower_age", "passed": True, "reason": None, "value": 32, "threshold": [18, 80], "stage": "check_1", "skipped": False},
+                        {"rule": "geography", "passed": True, "reason": None, "value": "560001", "threshold": "pan_india", "stage": "check_1", "skipped": False},
+                        {"rule": "business_vintage", "passed": True, "reason": None, "value": 24, "threshold": 0, "stage": "check_1", "skipped": False},
+                        {"rule": "min_cibil", "passed": True, "reason": None, "value": 740, "threshold": 300, "stage": "check_2", "skipped": False}
+                    ]
+                },
+                {
+                    "lender_name": "Flexiloans",
+                    "likely_to_approve": True,
+                    "fail_reason": None,
+                    "all_fail_reasons": [],
+                    "pass_count": 7,
+                    "fail_count": 0,
+                    "rule_details": [
+                        {"rule": "loan_type", "passed": True, "reason": None, "value": "unsecured", "threshold": "unsecured", "stage": "check_1", "skipped": False},
+                        {"rule": "loan_amount_range", "passed": True, "reason": None, "value": 1200000, "threshold": [1, 3000000], "stage": "check_1", "skipped": False},
+                        {"rule": "borrower_age", "passed": True, "reason": None, "value": 32, "threshold": [21, 65], "stage": "check_1", "skipped": False},
+                        {"rule": "geography", "passed": True, "reason": None, "value": "560001", "threshold": ["180", "181", "182", "184", "190", "191", "192", "193", "194", "795", "796", "797", "798", "799"], "stage": "check_1", "skipped": False},
+                        {"rule": "business_vintage", "passed": True, "reason": None, "value": 24, "threshold": 24, "stage": "check_1", "skipped": False},
+                        {"rule": "min_cibil", "passed": True, "reason": None, "value": 740, "threshold": 700, "stage": "check_2", "skipped": False},
+                        {"rule": "max_overdue_amount", "passed": True, "reason": None, "value": 0, "threshold": 40000, "stage": "check_2", "skipped": False}
+                    ]
+                },
+                {
+                    "lender_name": "Dummy Strict (Test)",
+                    "likely_to_approve": False,
+                    "fail_reason": "CIBIL 740 below minimum 780",
+                    "all_fail_reasons": ["CIBIL 740 below minimum 780"],
+                    "pass_count": 4,
+                    "fail_count": 1,
+                    "rule_details": [
+                        {"rule": "loan_type", "passed": True, "reason": None, "value": "unsecured", "threshold": "unsecured", "stage": "check_1", "skipped": False},
+                        {"rule": "loan_amount_range", "passed": True, "reason": None, "value": 1200000, "threshold": [500000, 2000000], "stage": "check_1", "skipped": False},
+                        {"rule": "borrower_age", "passed": True, "reason": None, "value": 32, "threshold": [25, 60], "stage": "check_1", "skipped": False},
+                        {"rule": "geography", "passed": True, "reason": None, "value": "560001", "threshold": "pan_india", "stage": "check_1", "skipped": False},
+                        {"rule": "min_cibil", "passed": False, "reason": "CIBIL 740 below minimum 780", "value": 740, "threshold": 780, "stage": "check_2", "skipped": False}
+                    ]
+                },
+                {
+                    "lender_name": "Piramal UBL Standard",
+                    "likely_to_approve": False,
+                    "fail_reason": "Overdue amount Rs 0 exceeds allowed Rs 0",
+                    "all_fail_reasons": ["Overdue amount Rs 0 exceeds allowed Rs 0"],
+                    "pass_count": 3,
+                    "fail_count": 1,
+                    "rule_details": [
+                        {"rule": "loan_type", "passed": True, "reason": None, "value": "unsecured", "threshold": "unsecured", "stage": "check_1", "skipped": False},
+                        {"rule": "loan_amount_range", "passed": True, "reason": None, "value": 1200000, "threshold": [500000, 3000000], "stage": "check_1", "skipped": False},
+                        {"rule": "borrower_age", "passed": True, "reason": None, "value": 32, "threshold": [23, 65], "stage": "check_1", "skipped": False},
+                        {"rule": "min_cibil", "passed": True, "reason": None, "value": 740, "threshold": 700, "stage": "check_2", "skipped": False}
+                    ]
+                }
+            ],
+            "lender_match_insight": "You are likely to qualify with a few lenders given your stable banking pattern and acceptable credit score."
+        },
+        "original_request": {
+            "emi_amount": 41800,
+            "remaining_monthly_surplus": 96200,
+            "risk_level": "Low"
+        }
+    }
