@@ -15,6 +15,7 @@ Run:
 from __future__ import annotations
 import json
 import pytest
+from datetime import datetime, timezone
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Loan Engine
@@ -22,9 +23,14 @@ import pytest
 
 from services.loan_engine import (
     run_engine, compute_monthly_emi_from_bank,
+    loan_amount_from_emi, emi_from_loan_amount, DEFAULT_MONTHLY_INTEREST_RATE,
+    banking_turnover_ratio_pct,
+    requested_loan_risk_level,
     _median, _std_dev, _qoq, _volatility_multiplier,
     _concentration_multiplier, _vintage_multiplier, _qoq_multiplier,
 )
+from services.existing_emi import EmiItem, compute_existing_emi
+from utils.usage_limits import MonthlyQuotaState, consume_monthly_quota
 
 SAMPLE_MONTHLY_CREDITS = {
     "2024-01": 380_000,
@@ -99,6 +105,63 @@ class TestLoanEngineMath:
             business_vintage_months= 36,
         )
         assert result["safe_loan_amount"] > 0
+        assert result["tenure_multiplier"] in {24, 36, 48}
+
+    def test_amortization_examples_are_reasonable(self):
+        # PDF v1.2 examples align with ~0.125% monthly (1.5% annual).
+        emi = emi_from_loan_amount(
+            3_000_000,
+            tenure_months=36,
+            monthly_interest_rate=DEFAULT_MONTHLY_INTEREST_RATE,
+        )
+        assert 83_000 <= emi <= 89_000
+
+        principal = loan_amount_from_emi(
+            73_790,
+            tenure_months=36,
+            monthly_interest_rate=DEFAULT_MONTHLY_INTEREST_RATE,
+        )
+        assert 2_400_000 <= principal <= 2_800_000
+
+    def test_bto_ratio_pct(self):
+        ratio = banking_turnover_ratio_pct(
+            monthly_banking_credit=437_916,
+            annual_turnover=19_243_457,
+        )
+        assert ratio is not None
+        assert 27.0 <= ratio <= 27.6
+
+    def test_v1_2_derived_fields_formulas(self):
+        annual_turnover = 19_243_457
+        margin = 0.15
+        min_itr_income = annual_turnover * margin
+        assert 2_800_000 <= min_itr_income <= 2_900_000
+
+    def test_original_request_risk_level(self):
+        assert requested_loan_risk_level(1.0) == "Low Risk"
+        assert requested_loan_risk_level(1.16) == "Moderate Risk"
+        assert requested_loan_risk_level(1.6) == "High Risk"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1b. Monthly Usage Limits
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMonthlyUsageLimits:
+    def test_quota_resets_on_new_month(self):
+        state = MonthlyQuotaState(month="2026-04", count=3)
+        now = datetime(2026, 5, 3, tzinfo=timezone.utc)
+        res = consume_monthly_quota(state=state, limit=3, now=now)
+        assert res.allowed is True
+        assert res.state.month == "2026-05"
+        assert res.state.count == 1
+
+    def test_quota_blocks_when_limit_reached(self):
+        state = MonthlyQuotaState(month="2026-05", count=3)
+        now = datetime(2026, 5, 20, tzinfo=timezone.utc)
+        res = consume_monthly_quota(state=state, limit=3, now=now)
+        assert res.allowed is False
+        assert res.state.count == 3
 
     def test_run_engine_raises_on_empty_credits(self):
         with pytest.raises(ValueError):
@@ -124,6 +187,19 @@ class TestLoanEngineMath:
         # A and B are same (lender, amount) → only counted once
         total = compute_monthly_emi_from_bank(emi_txns, cls_index)
         assert total == 32_876 + 5_947
+
+    def test_existing_emi_deduplicates_bureau_and_bank(self):
+        # v1.2 example: FLEXILOANS appears in both sources (≤5% diff) → count once (bank amount)
+        bureau = [
+            EmiItem(source="bureau", lender="FLEXILOANS", amount=18_000),
+            EmiItem(source="bureau", lender="HDFC", amount=12_430),
+        ]
+        bank = [
+            EmiItem(source="bank", lender="FLEXILOANS", amount=18_210),
+            EmiItem(source="bank", lender="BajajFin", amount=9_281),
+        ]
+        res = compute_existing_emi(bureau_items=bureau, bank_items=bank)
+        assert res.total == 39_921
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ from database.models import (
     AuditLog, LenderDecision, TransactionLabel,
 )
 from database.repositories.base import BaseRepository
+from utils.usage_limits import MonthlyQuotaState, consume_monthly_quota
 
 
 async def _upsert_signup_row(
@@ -212,6 +213,66 @@ class BorrowerRepository(BaseRepository[Borrower]):
             date_of_incorporation=kwargs.get("date_of_incorporation"),
         )
         return await self.get_by_id(borrower.id)  # type: ignore[return-value]
+
+    # ── Monthly usage limits ────────────────────────────────────────────────
+
+    async def consume_engine_run_quota(self, borrower_id: str, *, limit: int = 3) -> None:
+        """
+        Engine (Step 8) can run up to `limit` times per calendar month.
+        Resets on the 1st of every month.
+        """
+        stmt = select(Borrower).where(
+            Borrower.id == borrower_id,
+            Borrower.deleted_at.is_(None),
+        ).with_for_update()
+        result = await self._session.execute(stmt)
+        borrower = result.scalar_one_or_none()
+        if not borrower:
+            raise ValueError("Borrower not found.")
+
+        quota = consume_monthly_quota(
+            state=MonthlyQuotaState(month=borrower.engine_runs_month, count=borrower.engine_runs_count),
+            limit=limit,
+            now=datetime.now(timezone.utc),
+        )
+        if not quota.allowed:
+            raise ValueError(
+                f"Loan Engine limit reached: {limit} runs per month. "
+                f"Resets on {quota.next_reset_date}. (AA usage is unlimited.)"
+            )
+
+        borrower.engine_runs_month = quota.state.month
+        borrower.engine_runs_count = quota.state.count
+        await self._session.flush()
+
+    async def consume_cibil_fetch_quota(self, borrower_id: str, *, limit: int = 1) -> None:
+        """
+        CIBIL report (Step 4) can be fetched up to `limit` times per calendar month.
+        Resets on the 1st of every month.
+        """
+        stmt = select(Borrower).where(
+            Borrower.id == borrower_id,
+            Borrower.deleted_at.is_(None),
+        ).with_for_update()
+        result = await self._session.execute(stmt)
+        borrower = result.scalar_one_or_none()
+        if not borrower:
+            raise ValueError("Borrower not found.")
+
+        quota = consume_monthly_quota(
+            state=MonthlyQuotaState(month=borrower.cibil_fetch_month, count=borrower.cibil_fetch_count),
+            limit=limit,
+            now=datetime.now(timezone.utc),
+        )
+        if not quota.allowed:
+            raise ValueError(
+                f"CIBIL fetch limit reached: {limit} per month. "
+                f"Resets on {quota.next_reset_date}."
+            )
+
+        borrower.cibil_fetch_month = quota.state.month
+        borrower.cibil_fetch_count = quota.state.count
+        await self._session.flush()
 
 
 # ── Loan Application ──────────────────────────────────────────────────────────

@@ -78,10 +78,22 @@ CIBIL_HARD_STOP_THRESHOLD = 650   # Hard Stop B — must match Mizan spec
 _ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     "CIBIL_CONSENT_GIVEN": ["PROFILE_SAVED",        "CIBIL_CONSENT_GIVEN"],
     "CIBIL_FETCHED":       ["CIBIL_CONSENT_GIVEN"],
-    "AA_CONSENT_GIVEN":    ["CIBIL_FETCHED",         "AA_CONSENT_GIVEN"],
-    "AA_INIT_DONE":        ["AA_CONSENT_GIVEN"],
+    # AA is intentionally decoupled from CIBIL so borrowers can fetch bank
+    # account/statement details without first completing the bureau step.
+    # Keep AA steps retryable/idempotent to support flaky client flows.
+    "AA_CONSENT_GIVEN":    [
+        "PROFILE_SAVED",
+        "CIBIL_CONSENT_GIVEN",
+        "CIBIL_FETCHED",
+        "AA_CONSENT_GIVEN",
+        "AA_INIT_DONE",
+        "AA_CONSENT_COMPLETED",
+        "AA_FETCHED",
+    ],
+    "AA_INIT_DONE":        ["AA_CONSENT_GIVEN", "AA_INIT_DONE"],
     "AA_CONSENT_COMPLETED": ["AA_INIT_DONE", "AA_CONSENT_COMPLETED"],
-    "AA_FETCHED":          ["AA_CONSENT_COMPLETED"],
+    # Allow re-fetching AA data (no monthly usage limit).
+    "AA_FETCHED":          ["AA_CONSENT_COMPLETED", "AA_FETCHED"],
     "PROCESSING":          ["AA_FETCHED"],
 }
 
@@ -587,6 +599,9 @@ class LoanOrchestrator:
         if not borrower.individual_pan:
             raise ValueError("Individual PAN missing. Capture it during signup before fetching CIBIL.")
 
+        # Restriction: CIBIL can be fetched once per month per borrower.
+        await uow.borrowers.consume_cibil_fetch_quota(borrower.id)
+
         async def audit_cb(**kwargs):
             await uow.api_logs.log_call(application_id=application_id, **kwargs)
 
@@ -860,6 +875,29 @@ class LoanOrchestrator:
         total_credits = sum(t["amount"] for t in transactions if t["type"] == "CREDIT")
         active_days   = count_active_days(transactions)
 
+        # Minimum statement coverage requirement.
+        # If we have fewer than 12 distinct months, stop the flow and do not allow processing.
+        if len(months_set) < 12:
+            msg = "required minimum 12 months, no further analysis"
+            await uow.applications.update(
+                application_id,
+                status="FAILED",
+                failure_reason=msg,
+                hard_stop_code="INSUFFICIENT_BANK_HISTORY",
+                hard_stop_detail={
+                    "months_of_data": len(months_set),
+                    "required_months": 12,
+                },
+            )
+            await uow.audit_logs.log_event(
+                application_id=application_id,
+                event="HARD_STOP_INSUFFICIENT_BANK_HISTORY",
+                old_status=app.status,
+                new_status="FAILED",
+                metadata={"months_of_data": len(months_set), "required_months": 12},
+            )
+            raise ValueError(msg)
+
         # Detect historical EMI/OD patterns (triggers Mizan conditional question)
         emi_txns_raw = [
             t for t in transactions
@@ -997,6 +1035,10 @@ class LoanOrchestrator:
         if not raw_txns:
             raise ValueError("Bank statement missing. Complete Steps 5–7 first.")
 
+        # Restriction: Loan Engine (Step 8) can be used up to 3 times per month per borrower.
+        # Note: Account Aggregator (Steps 5–7) has no monthly usage limit.
+        await uow.borrowers.consume_engine_run_quota(borrower.id)
+
         await uow.applications.set_status(application_id, "PROCESSING")
 
         async def audit_cb(**kwargs):
@@ -1050,9 +1092,17 @@ class LoanOrchestrator:
         #                          → use all AA-detected EMIs
         if app.emi_od_settled is True:
             # Keep only EMIs from the last 3 months — historical ones are settled
-            cutoff_month = sorted(
-                {t["transaction_date"][:7] for t in raw_txns}
-            )[-3] if raw_txns else "0000-00"
+            months = sorted({
+                str(t.get("transaction_date") or "")[:7]
+                for t in raw_txns
+                if t.get("transaction_date")
+            })
+            # If we have < 3 months of data, fall back to earliest month available.
+            cutoff_month = (
+                months[-3] if len(months) >= 3
+                else months[0] if months
+                else "0000-00"
+            )
             emi_txns = [
                 t for t in all_emi_txns
                 if t["transaction_date"][:7] >= cutoff_month

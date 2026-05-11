@@ -220,6 +220,15 @@ class Borrower(TimestampMixin, Base):
     # ── AA bank mobile (may differ from personal mobile) ─────────────────────
     aa_bank_mobile:   Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
 
+    # ── Usage restrictions (calendar-month quotas) ───────────────────────────
+    # Engine can be used up to 3 times per month (resets on the 1st).
+    engine_runs_month: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)  # YYYY-MM
+    engine_runs_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # CIBIL can be fetched once per month (resets on the 1st).
+    cibil_fetch_month: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)  # YYYY-MM
+    cibil_fetch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     signup: Mapped[Optional["Signup"]] = relationship(
         back_populates="borrower",
         uselist=False,

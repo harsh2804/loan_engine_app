@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from config.settings import get_settings
 from lenders.engine import LenderConfig, LenderContext, LenderStrategy, RuleResult
 from lenders.registry import registry
 
@@ -447,3 +448,102 @@ registry.register(FlexiloansStrategy())
 registry.register(PiramalUBLStandardStrategy())
 registry.register(PiramalUBLPlusStrategy())
 registry.register(PiramalUBLGoldStrategy())
+
+
+# =============================================================================
+# Dummy lenders (local testing)
+# =============================================================================
+#
+# Enable by setting:
+#   ENABLE_DUMMY_LENDERS=1
+#
+# These are intentionally lenient/strict to let you quickly validate:
+# - eligibility pipeline wiring
+# - rule_details payload
+# - UI handling of eligible vs ineligible lenders
+#
+
+_ENABLE_DUMMY_LENDERS = bool(get_settings().enable_dummy_lenders)
+
+
+DUMMY_LENIENT_CONFIG = LenderConfig(
+    id="dummy_lenient",
+    name="Dummy Lenient (Test)",
+    loan_type="unsecured",
+    min_amount=1,
+    max_amount=10_000_000,
+    min_age=18,
+    max_age=80,
+    geography_mode="pan_india",
+    vintage_rules=(
+        {"max_loan_amount": 10_000_000, "min_months_owned": 0, "min_months_rented": 0},
+    ),
+    # Bureau: very permissive
+    min_cibil=300,
+    max_overdue_amount=10_000_000,
+    max_payment_delay_days=9999,
+    max_emi_bounces_6m=9999,
+    delinquency_allowed=True,
+    max_enquiries_2m=9999,
+    max_active_unsecured_loans=9999,
+    min_unsecured_track_emi_count=0,
+    min_unsecured_track_loan_ratio=0.0,
+    # Banking/financial: permissive
+    min_abb_rules=({"max_loan_amount": 10_000_000, "min_abb": 0},),
+    min_bto_rules=({"max_loan_amount": 10_000_000, "min_bto_absolute": 0},),
+    max_qoq_decline=-100.0,
+    account_type_rules=({"max_loan_amount": 10_000_000, "allowed_types": ["CA", "SB"]},),
+    statement_period_months=0,
+    gst_compliance_allowed=("active", "nil", "exempted"),
+    audited_financials_rules=({"max_loan_amount": 10_000_000, "required": False},),
+)
+
+
+DUMMY_STRICT_CONFIG = LenderConfig(
+    id="dummy_strict",
+    name="Dummy Strict (Test)",
+    loan_type="unsecured",
+    min_amount=500_000,
+    max_amount=2_000_000,
+    min_age=25,
+    max_age=60,
+    geography_mode="pan_india",
+    vintage_rules=(
+        {"max_loan_amount": 2_000_000, "min_months_owned": 36, "min_months_rented": 48},
+    ),
+    # Bureau: strict
+    min_cibil=780,
+    max_overdue_amount=0,
+    max_payment_delay_days=0,
+    max_emi_bounces_6m=0,
+    delinquency_allowed=False,
+    max_enquiries_2m=1,
+    max_active_unsecured_loans=1,
+    min_unsecured_track_emi_count=24,
+    min_unsecured_track_loan_ratio=0.8,
+    # Banking/financial: strict
+    min_abb_rules=({"max_loan_amount": 2_000_000, "min_abb": 250_000},),
+    min_bto_rules=({"max_loan_amount": 2_000_000, "min_bto_absolute": 750_000},),
+    max_qoq_decline=0.0,
+    account_type_rules=({"max_loan_amount": 2_000_000, "allowed_types": ["CA"]},),
+    statement_period_months=12,
+    gst_compliance_allowed=("active",),
+    audited_financials_rules=({"max_loan_amount": 2_000_000, "required": True},),
+    residence_stability_rules={"if_rented_months": 24, "if_owned_months": 0},
+    office_stability_rules={"if_rented_months": 24, "if_owned_months": 12},
+)
+
+
+class DummyLenientStrategy(ConfigurableLenderStrategy):
+    def __init__(self) -> None:
+        super().__init__(DUMMY_LENIENT_CONFIG)
+
+
+class DummyStrictStrategy(ConfigurableLenderStrategy):
+    def __init__(self) -> None:
+        super().__init__(DUMMY_STRICT_CONFIG)
+
+
+if _ENABLE_DUMMY_LENDERS:
+    registry.register(DummyLenientStrategy())
+    registry.register(DummyStrictStrategy())

@@ -21,9 +21,6 @@ from fastapi.responses import JSONResponse
 from config.settings import get_settings
 from database.connection import init_db, close_db
 
-# ── Import lenders to trigger self-registration in registry ──────────────────
-import lenders.strategies  # noqa: F401  — side effect: registers all lenders
-
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +31,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logging.basicConfig(level=getattr(logging, settings.log_level))
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+
+    # Import lenders after settings load so `.env` values (e.g. ENABLE_DUMMY_LENDERS)
+    # are visible at import-time for self-registration side effects.
+    import lenders.strategies  # noqa: F401
 
     # Create tables in dev mode (use Alembic migrations in production)
     if settings.debug:
