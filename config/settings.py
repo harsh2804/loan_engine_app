@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     app_version: str    = "2.0.0"
     debug: bool         = False
     log_level: str      = "INFO"
+    enable_dummy_lenders: bool = False
 
     # ── Database ─────────────────────────────────────────────────────────────
     database_url: str = Field(
