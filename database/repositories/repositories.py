@@ -245,7 +245,7 @@ class BorrowerRepository(BaseRepository[Borrower]):
         borrower.engine_runs_count = quota.state.count
         await self._session.flush()
 
-    async def consume_cibil_fetch_quota(self, borrower_id: str, *, limit: int = 1) -> None:
+    async def consume_cibil_fetch_quota(self, borrower_id: str, *, limit: int = 3) -> None:
         """
         CIBIL report (Step 4) can be fetched up to `limit` times per calendar month.
         Resets on the 1st of every month.
